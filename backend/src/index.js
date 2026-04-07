@@ -1,9 +1,14 @@
 const express = require('express');
+const cors = require('cors');
 const generateRouter = require('./routes/generate.routes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use(cors({
+  origin: ['http://localhost:4200', 'http://localhost:3000'],
+  credentials: true
+}));
 app.use(express.json({ limit: '1mb' }));
 app.use('/generate', generateRouter);
 

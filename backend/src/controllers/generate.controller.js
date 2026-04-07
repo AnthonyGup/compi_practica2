@@ -12,6 +12,10 @@ function generateAnalyzer(req, res) {
 
   try {
     const result = parseWisonWithJison(source);
+    if (!result.ok) {
+      return res.status(400).json({ ok: false, grammar: result });
+    }
+
     return res.status(200).json({ ok: true, grammar: result });
   } catch (error) {
     return res.status(400).json({
