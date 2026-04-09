@@ -6,16 +6,20 @@
 <INITIAL>[\r\n\t\ ]+                       /* skip */
 <INITIAL>\#.*                                /* skip line comment */
 <INITIAL>\/\*[^*]*\*+([^/*][^*]*\*+)*\/   /* skip block comment */
-<INITIAL>Wison                                return 'WISON';
+<INITIAL>Wison\¿                                return 'WISON';
 <INITIAL>\?Wison                             return 'END_WISON';
 <INITIAL>Lex                                  return 'LEX';
 <INITIAL>Syntax                               return 'SYNTAX';
 <INITIAL>"{{:"                               { this.begin('IN_SYNTAX'); return 'OPEN_SYNTAX'; }
 <INITIAL>"{:"                                 { this.begin('IN_LEX'); return 'OPEN_BLOCK'; }
 
+<IN_LEX>\#.*                                  /*  line comment */
+<IN_LEX>\/\*[^*]*\*+([^/*][^*]*\*+)*\/      /* skip block comment */
 <IN_LEX>":}"                                  { this.begin('INITIAL'); return 'CLOSE_BLOCK'; }
 <IN_LEX>[\s\S]                               return 'LEX_CHAR';
 
+<IN_SYNTAX>\#.*                               /* skip line comment */
+<IN_SYNTAX>\/\*[^*]*\*+([^/*][^*]*\*+)*\/   /* skip block comment */
 <IN_SYNTAX>":}}"                             { this.begin('INITIAL'); return 'CLOSE_SYNTAX'; }
 <IN_SYNTAX>[\s\S]                            return 'SYNTAX_CHAR';
 

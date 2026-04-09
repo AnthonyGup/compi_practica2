@@ -1,8 +1,9 @@
 const { parseWisonWithJison } = require('../parsers/wison.parser');
 const { tokenizeInput } = require('../services/lexer.service');
+const { parseTokensWithLL } = require('../services/ll-parser.service');
 const { normalizeErrorMessage } = require('../utils/error-messages');
 
-function tokenizeWithGeneratedLexer(req, res) {
+function analyzeInput(req, res) {
   const { source, input } = req.body || {};
 
   if (typeof source !== 'string' || !source.trim()) {
@@ -26,17 +27,34 @@ function tokenizeWithGeneratedLexer(req, res) {
       return res.status(400).json({
         ok: false,
         grammar,
-        errors: ['No se puede generar lexer porque la gramatica no es valida.']
+        errors: ['No se puede analizar entrada porque la gramatica no es valida.']
       });
     }
 
-    const lexicalResult = tokenizeInput(input, grammar.terminals);
-    const statusCode = lexicalResult.ok ? 200 : 400;
+    const lexical = tokenizeInput(input, grammar.terminals);
+
+    if (!lexical.ok) {
+      return res.status(400).json({
+        ok: false,
+        grammar,
+        lexical,
+        syntax: {
+          ok: false,
+          accepted: false,
+          errors: ['No se ejecutó el parser LL por errores léxicos.'],
+          steps: []
+        }
+      });
+    }
+
+    const syntax = parseTokensWithLL(lexical.tokens, grammar);
+    const statusCode = syntax.ok ? 200 : 400;
 
     return res.status(statusCode).json({
-      ok: lexicalResult.ok,
+      ok: syntax.ok,
       grammar,
-      lexical: lexicalResult
+      lexical,
+      syntax
     });
   } catch (error) {
     return res.status(400).json({
@@ -47,5 +65,5 @@ function tokenizeWithGeneratedLexer(req, res) {
 }
 
 module.exports = {
-  tokenizeWithGeneratedLexer
+  analyzeInput
 };

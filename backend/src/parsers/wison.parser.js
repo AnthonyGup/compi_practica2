@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { Parser } = require('jison');
 const { validateWisonGrammar } = require('./wison.validators');
+const { normalizeErrorMessage } = require('../utils/error-messages');
 
 const grammarPath = path.join(__dirname, 'wison.configuration.jison');
 const grammarSource = fs.readFileSync(grammarPath, 'utf8');
@@ -118,7 +119,7 @@ function parseWisonWithJison(source) {
   try {
     parsed = blockParser.parse(source);
   } catch (error) {
-    throw new Error(`Estructura Wison invalida: ${error.message}`);
+    throw new Error(normalizeErrorMessage(error, 'Estructura Wison invalida.'));
   }
 
   if (!parsed || typeof parsed.lexRaw !== 'string' || typeof parsed.syntaxRaw !== 'string') {

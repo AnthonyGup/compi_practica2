@@ -1,0 +1,58 @@
+:host {
+  display: block;
+  min-height: 100vh;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef4fb 100%);
+}
+
+textarea.form-control {
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 0.92rem;
+}
+
+.tree-ascii {
+  background: #f9f9f9;
+  border: 1px solid #e0e0e0;
+  border-radius: 0.35rem;
+  padding: 1rem;
+  font-family: "Courier New", monospace;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: #333;
+  overflow-x: auto;
+  white-space: pre;
+  margin: 0;
+}
+
+.tree {
+  padding-left: 0;
+}
+
+.tree li {
+  position: relative;
+  padding-left: 1rem;
+  margin: 0.4rem 0;
+}
+
+.tree li::before {
+  content: "";
+  position: absolute;
+  left: 0.2rem;
+  top: 0.85rem;
+  width: 0.55rem;
+  border-top: 1px solid #9eb4c9;
+}
+
+.tree-children {
+  margin-top: 0.4rem;
+  margin-left: 0.6rem;
+  border-left: 1px solid #d2dfec;
+  padding-left: 0.7rem;
+}
+
+.tree-node {
+  display: inline-block;
+  background: #f2f7fd;
+  border: 1px solid #d7e4f1;
+  border-radius: 0.45rem;
+  padding: 0.2rem 0.5rem;
+}

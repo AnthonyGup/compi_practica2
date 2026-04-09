@@ -2,42 +2,6 @@ function escapeRegex(text) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function splitTopLevel(expression, separator) {
-  const parts = [];
-  let current = '';
-  let depth = 0;
-
-  for (let index = 0; index < expression.length; index += 1) {
-    const char = expression[index];
-
-    if (char === '(') {
-      depth += 1;
-      current += char;
-      continue;
-    }
-
-    if (char === ')') {
-      depth -= 1;
-      current += char;
-      continue;
-    }
-
-    if (char === separator && depth === 0) {
-      parts.push(current.trim());
-      current = '';
-      continue;
-    }
-
-    current += char;
-  }
-
-  if (current.trim()) {
-    parts.push(current.trim());
-  }
-
-  return parts;
-}
-
 function tokenizeExpression(expression) {
   const tokens = [];
   let index = 0;

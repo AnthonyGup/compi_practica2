@@ -1,4 +1,5 @@
 const { parseWisonWithJison } = require('../parsers/wison.parser');
+const { normalizeErrorMessage } = require('../utils/error-messages');
 
 function generateAnalyzer(req, res) {
   const { source } = req.body || {};
@@ -20,7 +21,7 @@ function generateAnalyzer(req, res) {
   } catch (error) {
     return res.status(400).json({
       ok: false,
-      errors: [error.message]
+      errors: [normalizeErrorMessage(error)]
     });
   }
 }
