@@ -84,7 +84,7 @@ function extractProductions(syntaxRaw) {
       continue;
     }
 
-    const productionMatch = cleanedLine.match(/^(%_[A-Za-z0-9_]+)\s*<=\s*(.+?)\s*;\s*$/);
+    const productionMatch = cleanedLine.match(/^(%_[A-Za-z0-9_]+)\s*<=\s*(.*?)\s*;\s*$/);
 
     if (!productionMatch) {
       continue;
@@ -95,7 +95,7 @@ function extractProductions(syntaxRaw) {
     const alternatives = rightSide.split('|').map((alternative) => {
       const trimmedAlternative = alternative.trim();
 
-      if (!trimmedAlternative) {
+      if (!trimmedAlternative || /^(?:ε|epsilon|EPSILON)$/.test(trimmedAlternative)) {
         return [];
       }
 

@@ -6,6 +6,8 @@ function isNonTerminal(symbol) {
   return typeof symbol === 'string' && symbol.startsWith('%_');
 }
 
+const EPSILON = 'ε';
+
 function buildFirstSets(grammar) {
   const first = new Map();
 
@@ -23,28 +25,61 @@ function buildFirstSets(grammar) {
       const firstSet = first.get(nonTerminal);
 
       for (const alternative of alternatives) {
-        if (!alternative || alternative.length === 0) {
+        if (!Array.isArray(alternative)) {
           continue;
         }
 
-        const firstSymbol = alternative[0];
-
-        if (isTerminal(firstSymbol)) {
-          if (!firstSet.has(firstSymbol)) {
-            firstSet.add(firstSymbol);
+        if (alternative.length === 0) {
+          if (!firstSet.has(EPSILON)) {
+            firstSet.add(EPSILON);
             changed = true;
           }
           continue;
         }
 
-        if (isNonTerminal(firstSymbol)) {
-          const childFirst = first.get(firstSymbol) || new Set();
-          for (const token of childFirst) {
-            if (!firstSet.has(token)) {
-              firstSet.add(token);
+        let derivesEpsilon = true;
+
+        for (const symbol of alternative) {
+          if (isTerminal(symbol)) {
+            if (!firstSet.has(symbol)) {
+              firstSet.add(symbol);
               changed = true;
             }
+            derivesEpsilon = false;
+            break;
           }
+
+          if (isNonTerminal(symbol)) {
+            const childFirst = first.get(symbol) || new Set();
+            let childHasEpsilon = false;
+
+            for (const token of childFirst) {
+              if (token === EPSILON) {
+                childHasEpsilon = true;
+                continue;
+              }
+
+              if (!firstSet.has(token)) {
+                firstSet.add(token);
+                changed = true;
+              }
+            }
+
+            if (!childHasEpsilon) {
+              derivesEpsilon = false;
+              break;
+            }
+
+            continue;
+          }
+
+          derivesEpsilon = false;
+          break;
+        }
+
+        if (derivesEpsilon && !firstSet.has(EPSILON)) {
+          firstSet.add(EPSILON);
+          changed = true;
         }
       }
     }
@@ -53,37 +88,135 @@ function buildFirstSets(grammar) {
   return first;
 }
 
-function firstOfAlternative(alternative, firstSets) {
+function firstOfSequence(sequence, firstSets) {
   const result = new Set();
 
-  if (!alternative || alternative.length === 0) {
+  if (!Array.isArray(sequence) || sequence.length === 0) {
+    result.add(EPSILON);
     return result;
   }
 
-  const firstSymbol = alternative[0];
+  let derivesEpsilon = true;
 
-  if (isTerminal(firstSymbol)) {
-    result.add(firstSymbol);
-    return result;
-  }
-
-  if (isNonTerminal(firstSymbol)) {
-    const firstSet = firstSets.get(firstSymbol) || new Set();
-    for (const token of firstSet) {
-      result.add(token);
+  for (const symbol of sequence) {
+    if (isTerminal(symbol)) {
+      result.add(symbol);
+      derivesEpsilon = false;
+      break;
     }
+
+    if (isNonTerminal(symbol)) {
+      const symbolFirst = firstSets.get(symbol) || new Set();
+      let symbolHasEpsilon = false;
+
+      for (const token of symbolFirst) {
+        if (token === EPSILON) {
+          symbolHasEpsilon = true;
+          continue;
+        }
+
+        result.add(token);
+      }
+
+      if (!symbolHasEpsilon) {
+        derivesEpsilon = false;
+        break;
+      }
+
+      continue;
+    }
+
+    derivesEpsilon = false;
+    break;
+  }
+
+  if (derivesEpsilon) {
+    result.add(EPSILON);
   }
 
   return result;
 }
 
-function selectAlternative(nonTerminal, lookaheadType, grammar, firstSets) {
+function buildFollowSets(grammar, firstSets) {
+  const follow = new Map();
+
+  for (const nonTerminal of grammar.nonTerminals) {
+    follow.set(nonTerminal, new Set());
+  }
+
+  if (grammar.start && follow.has(grammar.start)) {
+    follow.get(grammar.start).add('$');
+  }
+
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+
+    for (const [leftSide, alternatives] of Object.entries(grammar.productions)) {
+      const leftFollow = follow.get(leftSide) || new Set();
+
+      for (const alternative of alternatives) {
+        if (!Array.isArray(alternative) || alternative.length === 0) {
+          continue;
+        }
+
+        for (let index = 0; index < alternative.length; index += 1) {
+          const symbol = alternative[index];
+
+          if (!isNonTerminal(symbol)) {
+            continue;
+          }
+
+          const symbolFollow = follow.get(symbol) || new Set();
+          const beta = alternative.slice(index + 1);
+          const firstBeta = firstOfSequence(beta, firstSets);
+
+          for (const token of firstBeta) {
+            if (token === EPSILON) {
+              continue;
+            }
+
+            if (!symbolFollow.has(token)) {
+              symbolFollow.add(token);
+              changed = true;
+            }
+          }
+
+          if (beta.length === 0 || firstBeta.has(EPSILON)) {
+            for (const token of leftFollow) {
+              if (!symbolFollow.has(token)) {
+                symbolFollow.add(token);
+                changed = true;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return follow;
+}
+
+function firstOfAlternative(alternative, firstSets) {
+  return firstOfSequence(alternative, firstSets);
+}
+
+function selectAlternative(nonTerminal, lookaheadType, grammar, firstSets, followSets) {
   const alternatives = grammar.productions[nonTerminal] || [];
   const matches = [];
+  const follow = followSets.get(nonTerminal) || new Set();
 
   for (const alternative of alternatives) {
     const altFirst = firstOfAlternative(alternative, firstSets);
+
     if (altFirst.has(lookaheadType)) {
+      matches.push(alternative);
+      continue;
+    }
+
+    if (altFirst.has(EPSILON) && follow.has(lookaheadType)) {
       matches.push(alternative);
     }
   }
@@ -109,6 +242,7 @@ function parseTokensWithLL(tokens, grammar) {
   const errors = [];
   const steps = [];
   const firstSets = buildFirstSets(grammar);
+  const followSets = buildFollowSets(grammar, firstSets);
   const input = [...tokens, { type: '$', lexeme: '$', line: null, column: null }];
   const derivationTree = {
     name: grammar.start,
@@ -163,7 +297,7 @@ function parseTokensWithLL(tokens, grammar) {
     }
 
     if (isNonTerminal(top)) {
-      const selection = selectAlternative(top, lookahead, grammar, firstSets);
+      const selection = selectAlternative(top, lookahead, grammar, firstSets, followSets);
 
       if (selection.error) {
         errors.push(selection.error);
@@ -173,10 +307,16 @@ function parseTokensWithLL(tokens, grammar) {
       const alternative = selection.alternative;
 
       if (node) {
-        node.children = alternative.map((symbol) => ({
-          name: symbol,
-          children: []
-        }));
+        node.children = alternative.length === 0
+          ? [{ name: EPSILON, children: [] }]
+          : alternative.map((symbol) => ({
+            name: symbol,
+            children: []
+          }));
+      }
+
+      if (alternative.length === 0) {
+        continue;
       }
 
       for (let i = alternative.length - 1; i >= 0; i -= 1) {

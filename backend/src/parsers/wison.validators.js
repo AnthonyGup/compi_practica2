@@ -8,6 +8,8 @@ function isNonTerminalSymbol(symbol) {
   return typeof symbol === 'string' && symbol.startsWith('%_');
 }
 
+const EPSILON = 'ε';
+
 //////////////////////////////////// VALIDACIONES DE SINTAXIS ////////////////////////////////////
 
 function validateLexLineSyntax(lexRaw) {
@@ -44,7 +46,7 @@ function validateSyntaxLineSyntax(syntaxRaw) {
 
     const isNonTerminalDeclaration = /^No_Terminal\s+%_[A-Za-z0-9_]+\s*;\s*$/.test(cleanedLine);
     const isInitialSymbolDeclaration = /^Initial_Sim\s+%_[A-Za-z0-9_]+\s*;\s*$/.test(cleanedLine);
-    const isProduction = /^%_[A-Za-z0-9_]+\s*<=\s*.+?\s*;\s*$/.test(cleanedLine);
+    const isProduction = /^%_[A-Za-z0-9_]+\s*<=\s*.*?\s*;\s*$/.test(cleanedLine);
 
     if (!isNonTerminalDeclaration && !isInitialSymbolDeclaration && !isProduction) {
       errors.push(`Sintaxis invalida en Syntax (linea ${index + 1}): ${cleanedLine}`);
@@ -64,8 +66,12 @@ function validateTerminalUsage(terminals, productions) {
     const alternatives = productions[nonTerminal];
 
     for (const alternative of alternatives) {
-      if (!Array.isArray(alternative) || alternative.length === 0) {
-        errors.push(`La produccion de ${nonTerminal} no puede estar vacia. No se permite epsilon.`);
+      if (!Array.isArray(alternative)) {
+        errors.push(`La produccion de ${nonTerminal} tiene un formato inválido.`);
+        continue;
+      }
+
+      if (alternative.length === 0) {
         continue;
       }
 
@@ -143,18 +149,7 @@ function validateInitialSymbol(syntaxRaw, nonTerminals, startSymbol) {
 //////////////////////////////////// VALIDACION EPSILON ////////////////////////////////////
 
 function validateNoEpsilonProductions(productions) {
-  const errors = [];
-
-  for (const [nonTerminal, alternatives] of Object.entries(productions)) {
-    for (const alternative of alternatives) {
-      if (alternative.length === 0) {
-        errors.push(`La produccion de ${nonTerminal} no puede estar vacia. No se permite epsilon.`);
-        continue;
-      }
-    }
-  }
-
-  return errors;
+  return [];
 }
 
 //////////////////////////////////// VALIDACION LL - FIRST/FOLLOW ////////////////////////////////////
@@ -176,9 +171,19 @@ function buildFirstSets(nonTerminals, productions) {
       const firstSet = firstSets.get(nonTerminal);
 
       for (const alternative of alternatives) {
-        if (alternative.length === 0) {
+        if (!Array.isArray(alternative)) {
           continue;
         }
+
+        if (alternative.length === 0) {
+          if (!firstSet.has(EPSILON)) {
+            firstSet.add(EPSILON);
+            changed = true;
+          }
+          continue;
+        }
+
+        let derivesEpsilon = true;
 
         for (const symbol of alternative) {
           if (isTerminalSymbol(symbol)) {
@@ -186,29 +191,157 @@ function buildFirstSets(nonTerminals, productions) {
               firstSet.add(symbol);
               changed = true;
             }
+            derivesEpsilon = false;
             break;
           }
 
           if (isNonTerminalSymbol(symbol)) {
             const symbolFirstSet = firstSets.get(symbol) || new Set();
+            let symbolHasEpsilon = false;
 
             for (const candidate of symbolFirstSet) {
+              if (candidate === EPSILON) {
+                symbolHasEpsilon = true;
+                continue;
+              }
+
               if (!firstSet.has(candidate)) {
                 firstSet.add(candidate);
                 changed = true;
               }
             }
 
-            break;
+            if (!symbolHasEpsilon) {
+              derivesEpsilon = false;
+              break;
+            }
+
+            continue;
           }
 
+          derivesEpsilon = false;
           break;
+        }
+
+        if (derivesEpsilon && !firstSet.has(EPSILON)) {
+          firstSet.add(EPSILON);
+          changed = true;
         }
       }
     }
   }
 
   return firstSets;
+}
+
+function firstOfSequence(sequence, firstSets) {
+  const result = new Set();
+
+  if (!Array.isArray(sequence) || sequence.length === 0) {
+    result.add(EPSILON);
+    return result;
+  }
+
+  let derivesEpsilon = true;
+
+  for (const symbol of sequence) {
+    if (isTerminalSymbol(symbol)) {
+      result.add(symbol);
+      derivesEpsilon = false;
+      break;
+    }
+
+    if (isNonTerminalSymbol(symbol)) {
+      const symbolFirstSet = firstSets.get(symbol) || new Set();
+      let symbolHasEpsilon = false;
+
+      for (const candidate of symbolFirstSet) {
+        if (candidate === EPSILON) {
+          symbolHasEpsilon = true;
+          continue;
+        }
+        result.add(candidate);
+      }
+
+      if (!symbolHasEpsilon) {
+        derivesEpsilon = false;
+        break;
+      }
+
+      continue;
+    }
+
+    derivesEpsilon = false;
+    break;
+  }
+
+  if (derivesEpsilon) {
+    result.add(EPSILON);
+  }
+
+  return result;
+}
+
+function buildFollowSets(nonTerminals, productions, startSymbol, firstSets) {
+  const followSets = new Map();
+
+  for (const nonTerminal of nonTerminals) {
+    followSets.set(nonTerminal, new Set());
+  }
+
+  if (startSymbol && followSets.has(startSymbol)) {
+    followSets.get(startSymbol).add('$');
+  }
+
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+
+    for (const [leftSide, alternatives] of Object.entries(productions)) {
+      const leftFollow = followSets.get(leftSide) || new Set();
+
+      for (const alternative of alternatives) {
+        if (!Array.isArray(alternative) || alternative.length === 0) {
+          continue;
+        }
+
+        for (let index = 0; index < alternative.length; index += 1) {
+          const symbol = alternative[index];
+
+          if (!isNonTerminalSymbol(symbol)) {
+            continue;
+          }
+
+          const symbolFollow = followSets.get(symbol) || new Set();
+          const beta = alternative.slice(index + 1);
+          const firstBeta = firstOfSequence(beta, firstSets);
+
+          for (const candidate of firstBeta) {
+            if (candidate === EPSILON) {
+              continue;
+            }
+
+            if (!symbolFollow.has(candidate)) {
+              symbolFollow.add(candidate);
+              changed = true;
+            }
+          }
+
+          if (beta.length === 0 || firstBeta.has(EPSILON)) {
+            for (const candidate of leftFollow) {
+              if (!symbolFollow.has(candidate)) {
+                symbolFollow.add(candidate);
+                changed = true;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return followSets;
 }
 
 //////////////////////////////////// VALIDACION LL - RECURSIVIDAD IZQUIERDA ////////////////////////////////////
@@ -269,74 +402,44 @@ function detectLeftRecursion(nonTerminals, productions) {
 function validatePredictiveConflicts(nonTerminals, productions, startSymbol, recursiveNonTerminals) {
   const errors = [];
   const firstSets = buildFirstSets(nonTerminals, productions);
+  const followSets = buildFollowSets(nonTerminals, productions, startSymbol, firstSets);
 
   for (const [nonTerminal, alternatives] of Object.entries(productions)) {
     if (recursiveNonTerminals.has(nonTerminal)) {
       continue;
     }
 
-    const alternativeFirstSets = alternatives.map((alternative) => {
-      const alternativeFirstSet = new Set();
-
-      if (alternative.length === 0) {
-        alternativeFirstSet.add('ε');
-        return alternativeFirstSet;
-      }
-
-      let derivesEpsilon = true;
-
-      for (const symbol of alternative) {
-        if (isTerminalSymbol(symbol)) {
-          alternativeFirstSet.add(symbol);
-          derivesEpsilon = false;
-          break;
-        }
-
-        if (isNonTerminalSymbol(symbol)) {
-          const symbolFirstSet = firstSets.get(symbol) || new Set();
-          let symbolHasEpsilon = false;
-
-          for (const candidate of symbolFirstSet) {
-            if (candidate === 'ε') {
-              symbolHasEpsilon = true;
-              continue;
-            }
-
-            alternativeFirstSet.add(candidate);
-          }
-
-          if (!symbolHasEpsilon) {
-            derivesEpsilon = false;
-            break;
-          }
-
-          continue;
-        }
-
-        derivesEpsilon = false;
-        break;
-      }
-
-      if (derivesEpsilon) {
-        alternativeFirstSet.add('ε');
-      }
-
-      return alternativeFirstSet;
-    });
+    const alternativeFirstSets = alternatives.map((alternative) => firstOfSequence(alternative, firstSets));
+    const follow = followSets.get(nonTerminal) || new Set();
 
     for (let i = 0; i < alternativeFirstSets.length; i += 1) {
       for (let j = i + 1; j < alternativeFirstSets.length; j += 1) {
-        const intersection = [...alternativeFirstSets[i]].filter((symbol) => alternativeFirstSets[j].has(symbol) && symbol !== 'ε');
+        const firstIWithoutEpsilon = [...alternativeFirstSets[i]].filter((symbol) => symbol !== EPSILON);
+        const firstJWithoutEpsilon = [...alternativeFirstSets[j]].filter((symbol) => symbol !== EPSILON);
 
-        if (intersection.length > 0) {
-          errors.push(`La gramática no está factorizada en ${nonTerminal}: las alternativas comparten FIRST(${intersection.join(', ')}).`);
+        const firstFirstIntersection = firstIWithoutEpsilon.filter((symbol) => firstJWithoutEpsilon.includes(symbol));
+
+        if (firstFirstIntersection.length > 0) {
+          errors.push(`La gramática no está factorizada en ${nonTerminal}: las alternativas comparten FIRST(${firstFirstIntersection.join(', ')}).`);
         }
-      }
-    }
 
-    for (const alternativeFirstSet of alternativeFirstSets) {
-      if (alternativeFirstSet.has('ε')) {
-        alternativeFirstSet.delete('ε');
+        if (alternativeFirstSets[i].has(EPSILON)) {
+          const firstFollowIntersection = firstJWithoutEpsilon.filter((symbol) => follow.has(symbol));
+          if (firstFollowIntersection.length > 0) {
+            errors.push(`Conflicto FIRST/FOLLOW en ${nonTerminal}: una alternativa epsilon colisiona con FOLLOW(${firstFollowIntersection.join(', ')}).`);
+          }
+        }
+
+        if (alternativeFirstSets[j].has(EPSILON)) {
+          const firstFollowIntersection = firstIWithoutEpsilon.filter((symbol) => follow.has(symbol));
+          if (firstFollowIntersection.length > 0) {
+            errors.push(`Conflicto FIRST/FOLLOW en ${nonTerminal}: una alternativa epsilon colisiona con FOLLOW(${firstFollowIntersection.join(', ')}).`);
+          }
+        }
+
+        if (alternativeFirstSets[i].has(EPSILON) && alternativeFirstSets[j].has(EPSILON)) {
+          errors.push(`Conflicto en ${nonTerminal}: no se permiten dos alternativas que deriven epsilon.`);
+        }
       }
     }
   }
