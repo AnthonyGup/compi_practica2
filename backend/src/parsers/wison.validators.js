@@ -1,11 +1,11 @@
 //////////////////////////////////// HELPERS BASE ////////////////////////////////////
 
 function isTerminalSymbol(symbol) {
-  return symbol.startsWith('$_');
+  return typeof symbol === 'string' && symbol.startsWith('$_');
 }
 
 function isNonTerminalSymbol(symbol) {
-  return symbol.startsWith('%_');
+  return typeof symbol === 'string' && symbol.startsWith('%_');
 }
 
 //////////////////////////////////// VALIDACIONES DE SINTAXIS ////////////////////////////////////
@@ -64,6 +64,11 @@ function validateTerminalUsage(terminals, productions) {
     const alternatives = productions[nonTerminal];
 
     for (const alternative of alternatives) {
+      if (!Array.isArray(alternative) || alternative.length === 0) {
+        errors.push(`La produccion de ${nonTerminal} no puede estar vacia. No se permite epsilon.`);
+        continue;
+      }
+
       for (const symbol of alternative) {
         if (isTerminalSymbol(symbol) && !declaredTerminalNames.has(symbol)) {
           errors.push(`Terminal ${symbol} usado en producción de ${nonTerminal} pero no fue declarado en el bloque Lex.`);
@@ -87,6 +92,10 @@ function validateNonTerminalUsage(nonTerminals, productions) {
     const alternatives = productions[nonTerminal];
 
     for (const alternative of alternatives) {
+      if (!Array.isArray(alternative) || alternative.length === 0) {
+        continue;
+      }
+
       for (const symbol of alternative) {
         if (isNonTerminalSymbol(symbol) && !declaredNonTerminalNames.has(symbol)) {
           errors.push(`No terminal ${symbol} usado en producción de ${nonTerminal} pero no fue declarado con No_Terminal.`);
@@ -131,6 +140,23 @@ function validateInitialSymbol(syntaxRaw, nonTerminals, startSymbol) {
   return errors;
 }
 
+//////////////////////////////////// VALIDACION EPSILON ////////////////////////////////////
+
+function validateNoEpsilonProductions(productions) {
+  const errors = [];
+
+  for (const [nonTerminal, alternatives] of Object.entries(productions)) {
+    for (const alternative of alternatives) {
+      if (alternative.length === 0) {
+        errors.push(`La produccion de ${nonTerminal} no puede estar vacia. No se permite epsilon.`);
+        continue;
+      }
+    }
+  }
+
+  return errors;
+}
+
 //////////////////////////////////// VALIDACION LL - FIRST/FOLLOW ////////////////////////////////////
 
 function buildFirstSets(nonTerminals, productions) {
@@ -151,15 +177,8 @@ function buildFirstSets(nonTerminals, productions) {
 
       for (const alternative of alternatives) {
         if (alternative.length === 0) {
-          if (!firstSet.has('ε')) {
-            firstSet.add('ε');
-            changed = true;
-          }
-
           continue;
         }
-
-        let derivesEpsilon = true;
 
         for (const symbol of alternative) {
           if (isTerminalSymbol(symbol)) {
@@ -167,143 +186,29 @@ function buildFirstSets(nonTerminals, productions) {
               firstSet.add(symbol);
               changed = true;
             }
-
-            derivesEpsilon = false;
             break;
           }
 
           if (isNonTerminalSymbol(symbol)) {
             const symbolFirstSet = firstSets.get(symbol) || new Set();
-            let symbolHasEpsilon = false;
 
             for (const candidate of symbolFirstSet) {
-              if (candidate === 'ε') {
-                symbolHasEpsilon = true;
-                continue;
-              }
-
               if (!firstSet.has(candidate)) {
                 firstSet.add(candidate);
                 changed = true;
               }
             }
 
-            if (!symbolHasEpsilon) {
-              derivesEpsilon = false;
-              break;
-            }
-
-            continue;
+            break;
           }
 
-          derivesEpsilon = false;
           break;
-        }
-
-        if (derivesEpsilon && !firstSet.has('ε')) {
-          firstSet.add('ε');
-          changed = true;
         }
       }
     }
   }
 
   return firstSets;
-}
-
-function buildFollowSets(nonTerminals, productions, startSymbol, firstSets) {
-  const followSets = new Map();
-
-  for (const nonTerminal of nonTerminals) {
-    followSets.set(nonTerminal, new Set());
-  }
-
-  if (startSymbol && followSets.has(startSymbol)) {
-    followSets.get(startSymbol).add('$');
-  }
-
-  let changed = true;
-
-  while (changed) {
-    changed = false;
-
-    for (const [leftSide, alternatives] of Object.entries(productions)) {
-      for (const alternative of alternatives) {
-        for (let index = 0; index < alternative.length; index += 1) {
-          const symbol = alternative[index];
-
-          if (!isNonTerminalSymbol(symbol) || !followSets.has(symbol)) {
-            continue;
-          }
-
-          const trailingSymbols = alternative.slice(index + 1);
-          const followSet = followSets.get(symbol);
-          let trailingCanDeriveEpsilon = true;
-
-          if (trailingSymbols.length === 0) {
-            for (const candidate of followSets.get(leftSide) || []) {
-              if (!followSet.has(candidate)) {
-                followSet.add(candidate);
-                changed = true;
-              }
-            }
-
-            continue;
-          }
-
-          for (const trailingSymbol of trailingSymbols) {
-            if (isTerminalSymbol(trailingSymbol)) {
-              if (!followSet.has(trailingSymbol)) {
-                followSet.add(trailingSymbol);
-                changed = true;
-              }
-
-              trailingCanDeriveEpsilon = false;
-              break;
-            }
-
-            if (isNonTerminalSymbol(trailingSymbol)) {
-              const trailingFirstSet = firstSets.get(trailingSymbol) || new Set();
-              let trailingHasEpsilon = false;
-
-              for (const candidate of trailingFirstSet) {
-                if (candidate === 'ε') {
-                  trailingHasEpsilon = true;
-                  continue;
-                }
-
-                if (!followSet.has(candidate)) {
-                  followSet.add(candidate);
-                  changed = true;
-                }
-              }
-
-              if (!trailingHasEpsilon) {
-                trailingCanDeriveEpsilon = false;
-                break;
-              }
-
-              continue;
-            }
-
-            trailingCanDeriveEpsilon = false;
-            break;
-          }
-
-          if (trailingCanDeriveEpsilon) {
-            for (const candidate of followSets.get(leftSide) || []) {
-              if (!followSet.has(candidate)) {
-                followSet.add(candidate);
-                changed = true;
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return followSets;
 }
 
 //////////////////////////////////// VALIDACION LL - RECURSIVIDAD IZQUIERDA ////////////////////////////////////
@@ -364,7 +269,6 @@ function detectLeftRecursion(nonTerminals, productions) {
 function validatePredictiveConflicts(nonTerminals, productions, startSymbol, recursiveNonTerminals) {
   const errors = [];
   const firstSets = buildFirstSets(nonTerminals, productions);
-  const followSets = buildFollowSets(nonTerminals, productions, startSymbol, firstSets);
 
   for (const [nonTerminal, alternatives] of Object.entries(productions)) {
     if (recursiveNonTerminals.has(nonTerminal)) {
@@ -431,20 +335,8 @@ function validatePredictiveConflicts(nonTerminals, productions, startSymbol, rec
     }
 
     for (const alternativeFirstSet of alternativeFirstSets) {
-      if (!alternativeFirstSet.has('ε')) {
-        continue;
-      }
-
-      const followSet = followSets.get(nonTerminal) || new Set();
-
-      for (const symbol of alternativeFirstSet) {
-        if (symbol === 'ε') {
-          continue;
-        }
-
-        if (followSet.has(symbol)) {
-          errors.push(`Conflicto LL(1) en ${nonTerminal}: FIRST/FOLLOW se intersectan con ${symbol}.`);
-        }
+      if (alternativeFirstSet.has('ε')) {
+        alternativeFirstSet.delete('ε');
       }
     }
   }
@@ -460,7 +352,8 @@ function validateWisonGrammar({ lexRaw, syntaxRaw, terminals, nonTerminals, star
     ...validateSyntaxLineSyntax(syntaxRaw),
     ...validateTerminalUsage(terminals, productions),
     ...validateNonTerminalUsage(nonTerminals, productions),
-    ...validateInitialSymbol(syntaxRaw, nonTerminals, startSymbol)
+    ...validateInitialSymbol(syntaxRaw, nonTerminals, startSymbol),
+    ...validateNoEpsilonProductions(productions)
   ];
 
   const leftRecursionResult = detectLeftRecursion(nonTerminals, productions);
