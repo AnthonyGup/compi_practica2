@@ -11,6 +11,8 @@ const EPSILON = 'ε';
 function buildFirstSets(grammar) {
   const first = new Map();
 
+  // El runtime reconstruye FIRST desde la gramática ya validada.
+  // Cada no terminal arranca con un conjunto vacío.
   for (const nonTerminal of grammar.nonTerminals) {
     first.set(nonTerminal, new Set());
   }
@@ -30,6 +32,7 @@ function buildFirstSets(grammar) {
         }
 
         if (alternative.length === 0) {
+          // La alternativa vacía representa epsilon y se registra como tal.
           if (!firstSet.has(EPSILON)) {
             firstSet.add(EPSILON);
             changed = true;
@@ -37,10 +40,13 @@ function buildFirstSets(grammar) {
           continue;
         }
 
+        // Igual que en validación, la secuencia solo produce epsilon si todos
+        // sus símbolos lo permiten.
         let derivesEpsilon = true;
 
         for (const symbol of alternative) {
           if (isTerminal(symbol)) {
+            // El primer terminal no anulable fija el inicio de la alternativa.
             if (!firstSet.has(symbol)) {
               firstSet.add(symbol);
               changed = true;
@@ -53,6 +59,8 @@ function buildFirstSets(grammar) {
             const childFirst = first.get(symbol) || new Set();
             let childHasEpsilon = false;
 
+            // Se propagan todos los terminales de FIRST del símbolo hijo.
+            // Si el hijo puede desaparecer, el análisis continúa con el siguiente.
             for (const token of childFirst) {
               if (token === EPSILON) {
                 childHasEpsilon = true;
@@ -92,6 +100,7 @@ function firstOfSequence(sequence, firstSets) {
   const result = new Set();
 
   if (!Array.isArray(sequence) || sequence.length === 0) {
+    // Una secuencia vacía equivale a epsilon.
     result.add(EPSILON);
     return result;
   }
@@ -100,6 +109,7 @@ function firstOfSequence(sequence, firstSets) {
 
   for (const symbol of sequence) {
     if (isTerminal(symbol)) {
+      // Si encontramos un terminal, ya no necesitamos mirar el resto.
       result.add(symbol);
       derivesEpsilon = false;
       break;
@@ -109,6 +119,7 @@ function firstOfSequence(sequence, firstSets) {
       const symbolFirst = firstSets.get(symbol) || new Set();
       let symbolHasEpsilon = false;
 
+      // Se agregan los terminales que pueden iniciar este símbolo.
       for (const token of symbolFirst) {
         if (token === EPSILON) {
           symbolHasEpsilon = true;
@@ -140,10 +151,12 @@ function firstOfSequence(sequence, firstSets) {
 function buildFollowSets(grammar, firstSets) {
   const follow = new Map();
 
+  // FOLLOW se calcula sobre los no terminales que ya conoce la gramática.
   for (const nonTerminal of grammar.nonTerminals) {
     follow.set(nonTerminal, new Set());
   }
 
+  // El símbolo inicial siempre puede ir seguido por fin de entrada.
   if (grammar.start && follow.has(grammar.start)) {
     follow.get(grammar.start).add('$');
   }
@@ -161,6 +174,7 @@ function buildFollowSets(grammar, firstSets) {
           continue;
         }
 
+        // Cada aparición de un no terminal debe analizarse con su contexto local.
         for (let index = 0; index < alternative.length; index += 1) {
           const symbol = alternative[index];
 
@@ -172,6 +186,7 @@ function buildFollowSets(grammar, firstSets) {
           const beta = alternative.slice(index + 1);
           const firstBeta = firstOfSequence(beta, firstSets);
 
+          // Todo terminal que pueda comenzar beta puede seguir al símbolo actual.
           for (const token of firstBeta) {
             if (token === EPSILON) {
               continue;
@@ -184,6 +199,7 @@ function buildFollowSets(grammar, firstSets) {
           }
 
           if (beta.length === 0 || firstBeta.has(EPSILON)) {
+            // Si beta desaparece, el FOLLOW del lado izquierdo también aplica.
             for (const token of leftFollow) {
               if (!symbolFollow.has(token)) {
                 symbolFollow.add(token);
@@ -199,23 +215,22 @@ function buildFollowSets(grammar, firstSets) {
   return follow;
 }
 
-function firstOfAlternative(alternative, firstSets) {
-  return firstOfSequence(alternative, firstSets);
-}
-
 function selectAlternative(nonTerminal, lookaheadType, grammar, firstSets, followSets) {
   const alternatives = grammar.productions[nonTerminal] || [];
   const matches = [];
   const follow = followSets.get(nonTerminal) || new Set();
 
   for (const alternative of alternatives) {
-    const altFirst = firstOfAlternative(alternative, firstSets);
+    const altFirst = firstOfSequence(alternative, firstSets);
 
+    // Caso normal: el lookahead pertenece al FIRST de la alternativa.
     if (altFirst.has(lookaheadType)) {
       matches.push(alternative);
       continue;
     }
 
+    // Caso epsilon: se permite la alternativa vacía si el lookahead
+    // pertenece al FOLLOW del no terminal actual.
     if (altFirst.has(EPSILON) && follow.has(lookaheadType)) {
       matches.push(alternative);
     }
@@ -241,6 +256,8 @@ function selectAlternative(nonTerminal, lookaheadType, grammar, firstSets, follo
 function parseTokensWithLL(tokens, grammar) {
   const errors = [];
   const steps = [];
+  // El parser reconstruye FIRST/FOLLOW en runtime para tomar decisiones
+  // predictivas directamente sobre la gramática ya validada.
   const firstSets = buildFirstSets(grammar);
   const followSets = buildFollowSets(grammar, firstSets);
   const input = [...tokens, { type: '$', lexeme: '$', line: null, column: null }];
@@ -297,6 +314,8 @@ function parseTokensWithLL(tokens, grammar) {
     }
 
     if (isNonTerminal(top)) {
+      // El no terminal del tope se expande con la producción que corresponda
+      // al lookahead actual.
       const selection = selectAlternative(top, lookahead, grammar, firstSets, followSets);
 
       if (selection.error) {
@@ -307,6 +326,8 @@ function parseTokensWithLL(tokens, grammar) {
       const alternative = selection.alternative;
 
       if (node) {
+        // Si la alternativa es epsilon, se materializa como un nodo hoja
+        // para que el árbol muestre explícitamente la derivación vacía.
         node.children = alternative.length === 0
           ? [{ name: EPSILON, children: [] }]
           : alternative.map((symbol) => ({
@@ -316,6 +337,7 @@ function parseTokensWithLL(tokens, grammar) {
       }
 
       if (alternative.length === 0) {
+        // Epsilon no consume entrada ni empuja símbolos a la pila.
         continue;
       }
 

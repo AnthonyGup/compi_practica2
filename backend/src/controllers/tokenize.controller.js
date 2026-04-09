@@ -1,25 +1,16 @@
 const { parseWisonWithJison } = require('../parsers/wison.parser');
 const { tokenizeInput } = require('../services/lexer.service');
-const { normalizeErrorMessage } = require('../utils/error-messages');
+const { validateRequiredTextFields, respondWithNormalizedError } = require('../utils/controller-helpers');
 
 function tokenizeWithGeneratedLexer(req, res) {
-  const { source, input } = req.body || {};
+  const validation = validateRequiredTextFields(req.body, ['source', 'input']);
 
-  if (typeof source !== 'string' || !source.trim()) {
-    return res.status(400).json({
-      ok: false,
-      errors: ['El campo "source" es obligatorio y debe ser texto.']
-    });
-  }
-
-  if (typeof input !== 'string') {
-    return res.status(400).json({
-      ok: false,
-      errors: ['El campo "input" es obligatorio y debe ser texto.']
-    });
+  if (!validation.ok) {
+    return res.status(validation.statusCode).json(validation.payload);
   }
 
   try {
+    const { source, input } = validation.values;
     const grammar = parseWisonWithJison(source);
 
     if (!grammar.ok) {
@@ -39,10 +30,7 @@ function tokenizeWithGeneratedLexer(req, res) {
       lexical: lexicalResult
     });
   } catch (error) {
-    return res.status(400).json({
-      ok: false,
-      errors: [normalizeErrorMessage(error)]
-    });
+    return respondWithNormalizedError(res, error);
   }
 }
 

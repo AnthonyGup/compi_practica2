@@ -1,13 +1,16 @@
 //////////////////////////////////// HELPERS BASE ////////////////////////////////////
 
+// Un terminal en Wison siempre usa el prefijo $_.
 function isTerminalSymbol(symbol) {
   return typeof symbol === 'string' && symbol.startsWith('$_');
 }
 
+// Un no terminal en Wison siempre usa el prefijo %_.
 function isNonTerminalSymbol(symbol) {
   return typeof symbol === 'string' && symbol.startsWith('%_');
 }
 
+// Símbolo reservado para representar producciones vacías.
 const EPSILON = 'ε';
 
 //////////////////////////////////// VALIDACIONES DE SINTAXIS ////////////////////////////////////
@@ -146,17 +149,14 @@ function validateInitialSymbol(syntaxRaw, nonTerminals, startSymbol) {
   return errors;
 }
 
-//////////////////////////////////// VALIDACION EPSILON ////////////////////////////////////
-
-function validateNoEpsilonProductions(productions) {
-  return [];
-}
-
 //////////////////////////////////// VALIDACION LL - FIRST/FOLLOW ////////////////////////////////////
 
+// Calcula FIRST con una iteración de punto fijo:
+// se recorren las producciones repetidamente hasta que ningún conjunto cambia.
 function buildFirstSets(nonTerminals, productions) {
   const firstSets = new Map();
 
+  // Cada no terminal empieza con un conjunto FIRST vacío.
   for (const nonTerminal of nonTerminals) {
     firstSets.set(nonTerminal, new Set());
   }
@@ -176,6 +176,7 @@ function buildFirstSets(nonTerminals, productions) {
         }
 
         if (alternative.length === 0) {
+          // Una alternativa vacía aporta epsilon directamente al FIRST.
           if (!firstSet.has(EPSILON)) {
             firstSet.add(EPSILON);
             changed = true;
@@ -183,10 +184,14 @@ function buildFirstSets(nonTerminals, productions) {
           continue;
         }
 
+        // Una secuencia solo puede derivar epsilon si todos sus símbolos
+        // pueden desaparecer. Si alguno produce un terminal obligatorio,
+        // la cadena completa ya no puede ser vacía.
         let derivesEpsilon = true;
 
         for (const symbol of alternative) {
           if (isTerminalSymbol(symbol)) {
+            // El primer terminal que aparece en la secuencia determina FIRST.
             if (!firstSet.has(symbol)) {
               firstSet.add(symbol);
               changed = true;
@@ -199,6 +204,8 @@ function buildFirstSets(nonTerminals, productions) {
             const symbolFirstSet = firstSets.get(symbol) || new Set();
             let symbolHasEpsilon = false;
 
+            // Se incorporan todos los terminales del FIRST del símbolo actual.
+            // Si el símbolo puede derivar epsilon, el análisis continúa con el siguiente.
             for (const candidate of symbolFirstSet) {
               if (candidate === EPSILON) {
                 symbolHasEpsilon = true;
@@ -238,10 +245,14 @@ function firstOfSequence(sequence, firstSets) {
   const result = new Set();
 
   if (!Array.isArray(sequence) || sequence.length === 0) {
+    // FIRST de una secuencia vacía es epsilon por definición.
     result.add(EPSILON);
     return result;
   }
 
+  // Esta función generaliza FIRST a una secuencia completa.
+  // Es la base para evaluar alternativas como A -> B C D,
+  // donde FIRST depende del primer símbolo no anulable.
   let derivesEpsilon = true;
 
   for (const symbol of sequence) {
@@ -255,6 +266,8 @@ function firstOfSequence(sequence, firstSets) {
       const symbolFirstSet = firstSets.get(symbol) || new Set();
       let symbolHasEpsilon = false;
 
+      // Si el símbolo puede producir terminales, se agregan.
+      // Si también puede producir epsilon, se sigue con el resto de la secuencia.
       for (const candidate of symbolFirstSet) {
         if (candidate === EPSILON) {
           symbolHasEpsilon = true;
@@ -285,14 +298,17 @@ function firstOfSequence(sequence, firstSets) {
 function buildFollowSets(nonTerminals, productions, startSymbol, firstSets) {
   const followSets = new Map();
 
+  // FOLLOW también arranca vacío para cada no terminal.
   for (const nonTerminal of nonTerminals) {
     followSets.set(nonTerminal, new Set());
   }
 
+  // El símbolo inicial siempre puede ir seguido por el fin de entrada.
   if (startSymbol && followSets.has(startSymbol)) {
     followSets.get(startSymbol).add('$');
   }
 
+  // FOLLOW también se calcula por iteración hasta estabilizarse.
   let changed = true;
 
   while (changed) {
@@ -306,6 +322,7 @@ function buildFollowSets(nonTerminals, productions, startSymbol, firstSets) {
           continue;
         }
 
+        // Recorremos la producción completa para ubicar cada aparición de no terminal.
         for (let index = 0; index < alternative.length; index += 1) {
           const symbol = alternative[index];
 
@@ -314,9 +331,11 @@ function buildFollowSets(nonTerminals, productions, startSymbol, firstSets) {
           }
 
           const symbolFollow = followSets.get(symbol) || new Set();
+          // beta representa todo lo que aparece a la derecha del símbolo actual.
           const beta = alternative.slice(index + 1);
           const firstBeta = firstOfSequence(beta, firstSets);
 
+          // Todo terminal que pueda iniciar beta también puede seguir al símbolo.
           for (const candidate of firstBeta) {
             if (candidate === EPSILON) {
               continue;
@@ -329,6 +348,8 @@ function buildFollowSets(nonTerminals, productions, startSymbol, firstSets) {
           }
 
           if (beta.length === 0 || firstBeta.has(EPSILON)) {
+            // Si beta desaparece por completo, el FOLLOW del lado izquierdo
+            // también pasa a formar parte del FOLLOW del símbolo actual.
             for (const candidate of leftFollow) {
               if (!symbolFollow.has(candidate)) {
                 symbolFollow.add(candidate);
@@ -346,6 +367,8 @@ function buildFollowSets(nonTerminals, productions, startSymbol, firstSets) {
 
 //////////////////////////////////// VALIDACION LL - RECURSIVIDAD IZQUIERDA ////////////////////////////////////
 
+// Detecta recursión izquierda directa o indirecta construyendo un grafo
+// de dependencias entre no terminales según el primer símbolo de cada producción.
 function detectLeftRecursion(nonTerminals, productions) {
   const errors = [];
   const recursiveNonTerminals = new Set();
@@ -365,6 +388,8 @@ function detectLeftRecursion(nonTerminals, productions) {
     }
   }
 
+  // DFS sobre el grafo de dependencias para verificar si un símbolo puede
+  // derivar nuevamente en sí mismo por la izquierda.
   function hasPath(startSymbol, targetSymbol, visited = new Set()) {
     if (visited.has(startSymbol)) {
       return false;
@@ -399,6 +424,9 @@ function detectLeftRecursion(nonTerminals, productions) {
 
 /////////////////////////////////// VALIDACION LL - CONFLICTOS PREDICTIVOS ////////////////////////////////////
 
+// Verifica que la gramática sea LL(1):
+// - FIRST/FIRST: dos alternativas no pueden empezar con el mismo terminal.
+// - FIRST/FOLLOW: si una alternativa deriva epsilon, su uso debe ser compatible con FOLLOW.
 function validatePredictiveConflicts(nonTerminals, productions, startSymbol, recursiveNonTerminals) {
   const errors = [];
   const firstSets = buildFirstSets(nonTerminals, productions);
@@ -406,9 +434,12 @@ function validatePredictiveConflicts(nonTerminals, productions, startSymbol, rec
 
   for (const [nonTerminal, alternatives] of Object.entries(productions)) {
     if (recursiveNonTerminals.has(nonTerminal)) {
+      // Un no terminal con recursión izquierda ya rompe LL(1), así que
+      // no tiene sentido seguir evaluando conflictos predictivos aquí.
       continue;
     }
 
+    // Calculamos FIRST de cada alternativa completa, no solo de su primer símbolo.
     const alternativeFirstSets = alternatives.map((alternative) => firstOfSequence(alternative, firstSets));
     const follow = followSets.get(nonTerminal) || new Set();
 
@@ -420,10 +451,14 @@ function validatePredictiveConflicts(nonTerminals, productions, startSymbol, rec
         const firstFirstIntersection = firstIWithoutEpsilon.filter((symbol) => firstJWithoutEpsilon.includes(symbol));
 
         if (firstFirstIntersection.length > 0) {
+          // Dos alternativas que arrancan con el mismo terminal harían
+          // imposible decidir cuál expandir usando un solo lookahead.
           errors.push(`La gramática no está factorizada en ${nonTerminal}: las alternativas comparten FIRST(${firstFirstIntersection.join(', ')}).`);
         }
 
         if (alternativeFirstSets[i].has(EPSILON)) {
+          // Si una alternativa puede ser vacía, entonces su uso depende del
+          // contexto: solo es válida cuando el lookahead pertenece al FOLLOW.
           const firstFollowIntersection = firstJWithoutEpsilon.filter((symbol) => follow.has(symbol));
           if (firstFollowIntersection.length > 0) {
             errors.push(`Conflicto FIRST/FOLLOW en ${nonTerminal}: una alternativa epsilon colisiona con FOLLOW(${firstFollowIntersection.join(', ')}).`);
@@ -438,6 +473,8 @@ function validatePredictiveConflicts(nonTerminals, productions, startSymbol, rec
         }
 
         if (alternativeFirstSets[i].has(EPSILON) && alternativeFirstSets[j].has(EPSILON)) {
+          // No tiene sentido tener dos producciones vacías para el mismo
+          // no terminal en un parser predictivo.
           errors.push(`Conflicto en ${nonTerminal}: no se permiten dos alternativas que deriven epsilon.`);
         }
       }
@@ -449,6 +486,8 @@ function validatePredictiveConflicts(nonTerminals, productions, startSymbol, rec
 
 //////////////////////////////////// ORQUESTADOR DE VALIDACIONES ////////////////////////////////////
 
+// Punto de entrada de toda la validación semántica de la gramática Wison.
+// Aquí se combinan validaciones de sintaxis, uso de símbolos y reglas LL(1).
 function validateWisonGrammar({ lexRaw, syntaxRaw, terminals, nonTerminals, startSymbol, productions }) {
   const errors = [
     ...validateLexLineSyntax(lexRaw),
@@ -456,7 +495,6 @@ function validateWisonGrammar({ lexRaw, syntaxRaw, terminals, nonTerminals, star
     ...validateTerminalUsage(terminals, productions),
     ...validateNonTerminalUsage(nonTerminals, productions),
     ...validateInitialSymbol(syntaxRaw, nonTerminals, startSymbol),
-    ...validateNoEpsilonProductions(productions)
   ];
 
   const leftRecursionResult = detectLeftRecursion(nonTerminals, productions);
